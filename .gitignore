@@ -1,0 +1,6 @@
+*.pyc
+*~
+*#
+venv
+py2-7-environment
+test.db
