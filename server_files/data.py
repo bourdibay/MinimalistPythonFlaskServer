@@ -27,7 +27,7 @@ class Questions(db.Model) :
     
 class Answers(db.Model):
     id = db.Column(db.Integer, primary_key=True, unique=True, autoincrement=True)
-    content = db.Column(db.String(50))
+    content = db.Column(db.String(50), unique=True)
     
     def __init__(self, answer):
         self.content = answer

@@ -59,13 +59,14 @@ def test_init():
         db.session.add(answer_binding)
     db.session.commit()
 
+def clean_db():
+    db.reflect()
+    db.drop_all()
 
 @app.route('/cleanall')
 @cross_origin()
 def clean_all():
-    db.reflect()
-    db.drop_all()
-    data.signed_users.clear()
+    clean_db()
     test_init()
     return "Clean!"
 
@@ -79,6 +80,7 @@ def serve_index(path):
 @app.before_first_request
 def initialize():
     try:
+        clean_db()
         test_init()
     except Exception as e:
         utils.print_exception(e)
