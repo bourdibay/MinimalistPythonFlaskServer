@@ -7,6 +7,7 @@ import unittest
 import tempfile
 import json
 from datetime import datetime
+from datetime import timedelta
 
 def dateToStr(year, month, day, hour, minute):
     return "{year}-{month}-{day} {hour}:{minute}".format(year=year, 
@@ -21,7 +22,6 @@ def strToDateTuple(str):
     for i in range(1, 6):
         ret.append(int(m.group(i)))
     return tuple(ret)
-#    return (int(m.group(1)), int(m.group(2)), int(m.group(3)), m.group(4), m.group(5))
 
 class QuestionTest(object):
     def __init__(self, start_date, end_date):
@@ -45,7 +45,7 @@ class ServerTestCase(unittest.TestCase):
         app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///' + os.path.join(app.root_path, 'test.db')
         self.app = app.test_client()
         server.clean_db()
-        server.test_init()
+        db.create_all()
 
     def tearDown(self):
         db.session.remove()
@@ -67,23 +67,49 @@ class ServerTestCase(unittest.TestCase):
         self.assertEqual(actual_hour, hour)
         self.assertEqual(actual_minute, minute)
 
-    def test_createQuestion_correctArgs(self):
-        """
-        Test that we can create a valid question/answers.
-        Route tested: /questions/create_question
-        """
-        # Create question
-        question_test = QuestionTest((2015, 5, 30, 15, 52), (2015, 5, 30, 16, 1))
+    def postValidQuestion(self):
+        now = datetime.now()
+        expired = now + timedelta(minutes=5)
+        # Create a question valid for 5 minutes
+
+        question_test = QuestionTest((now.year, now.month, now.day, now.hour, now.minute),
+                                     (expired.year, expired.month, expired.day, expired.hour, expired.minute))
         rv = self.app.post("/questions/create_question", data=dict(
             question=question_test.question,
             answers=question_test.answers,
             datetime_start=question_test.datetime_start,
             datetime_expiry=question_test.datetime_expiry),
                       follow_redirects=True)
+        return (question_test, rv)
 
+    def postExpiredQuestion(self):
+        now = datetime.now()
+        start = now - timedelta(minutes=10)
+        expired = now - timedelta(minutes=5)
+        # Create a question valid for 5 minutes
+        question_test = QuestionTest((start.year, start.month, start.day, start.hour, start.minute),
+                                     (expired.year, expired.month, expired.day, expired.hour, expired.minute))
+        rv = self.app.post("/questions/create_question", data=dict(
+            question=question_test.question,
+            answers=question_test.answers,
+            datetime_start=question_test.datetime_start,
+            datetime_expiry=question_test.datetime_expiry),
+                      follow_redirects=True)
+        return (question_test, rv)
+
+    def checkValidMessage(self, rv):
         # Check return value
         rv_data = json.loads(rv.data.decode("utf-8"))
         self.assertTrue(rv_data['success'])
+
+    def test_createQuestion_correctArgs(self):
+        """
+        Test that we can create a valid question/answers.
+        Route tested: /questions/create_question
+        """
+        # Create question
+        question_test, rv = self.postValidQuestion()
+        self.checkValidMessage(rv)
 
     def test_createQuestion_correctlyInserted(self):
         """
@@ -91,13 +117,7 @@ class ServerTestCase(unittest.TestCase):
         Route tested: /questions/create_question
         """
         # Create question
-        question_test = QuestionTest((2015, 5, 30, 15, 52), (2015, 5, 30, 16, 1))
-        rv = self.app.post("/questions/create_question", data=dict(
-            question=question_test.question,
-            answers=question_test.answers,
-            datetime_start=question_test.datetime_start,
-            datetime_expiry=question_test.datetime_expiry),
-                      follow_redirects=True)
+        question_test, _ = self.postValidQuestion()
 
         # Perform the queries
         actual_question = data.Questions.query.filter_by(content=question_test.question).first()
@@ -121,19 +141,10 @@ class ServerTestCase(unittest.TestCase):
         """
         Route tested: /questions/get_all_questions_answers
         """
-        now = datetime.now()
         # Create a question valid for 5 minutes
-        question_test = QuestionTest((now.year, now.month, now.day, now.hour, now.minute), (now.year, now.month, now.day, now.hour, now.minute + 5))
-        rv = self.app.post("/questions/create_question", data=dict(
-            question=question_test.question,
-            answers=question_test.answers,
-            datetime_start=question_test.datetime_start,
-            datetime_expiry=question_test.datetime_expiry),
-                      follow_redirects=True)
+        question_test, rv = self.postValidQuestion()
 
-        # Check return value
-        rv_data = json.loads(rv.data.decode("utf-8"))
-        self.assertTrue(rv_data['success'])
+        self.checkValidMessage(rv)
 
         rv = self.app.get("/questions/get_all_questions_answers")
         rv_data = json.loads(rv.data.decode("utf-8"))
@@ -148,7 +159,6 @@ class ServerTestCase(unittest.TestCase):
         json_question_datetime_start = json_obj[0]['datetime_start']
         json_question_content = json_obj[0]['content']
 
-
         self.assertIsNotNone(json_answers)
         self.assertEqual(len(json_answers), 3) # 3 answers
 
@@ -159,6 +169,58 @@ class ServerTestCase(unittest.TestCase):
         self.compare_dates_tuples(*(datetime_end_tuple + question_test.end_date))
         self.assertEqual(json_question_content, question_test.question)
 
+    def test_incNbVotes_voteReallyIncreased(self):
+        """
+        Route tested: /answer/vote
+        """
+        question_test, rv = self.postValidQuestion()
+        self.checkValidMessage(rv)
+
+        question = data.Questions.query.filter_by(content=question_test.question).first()
+        answer = data.Answers.query.filter_by(content=question_test.answers_list[-1]).first()
+        answer_binding = data.AnswersBinding.query.filter_by(question_id=question.id,
+                                                             answer_id=answer.id).first()
+
+        previous_nb_votes = answer_binding.nb_votes
+
+        rv = self.app.post("/answer/vote", data=dict(
+            question_id=question.id,
+            answer_id=answer.id), follow_redirects=True)
+        
+        self.checkValidMessage(rv)
+
+        answer_binding = data.AnswersBinding.query.filter_by(question_id=question.id,
+                                                             answer_id=answer.id).first()
+        current_nb_votes = answer_binding.nb_votes
+        self.assertEqual(current_nb_votes, previous_nb_votes + 1, "The vote has not been taken account")
+
+    def test_incNbVotes_expiredQuestion_noIncrease(self):
+        """
+        Test that if we vote for a question with an expired date < current date,
+        we get an error and the number of votes did not change.
+        Route tested: /answer/vote
+        """
+        question_test, rv = self.postExpiredQuestion()
+        self.checkValidMessage(rv)
+
+        question = data.Questions.query.filter_by(content=question_test.question).first()
+        answer = data.Answers.query.filter_by(content=question_test.answers_list[-1]).first()
+        answer_binding = data.AnswersBinding.query.filter_by(question_id=question.id,
+                                                             answer_id=answer.id).first()
+
+        previous_nb_votes = answer_binding.nb_votes
+
+        rv = self.app.post("/answer/vote", data=dict(
+            question_id=question.id,
+            answer_id=answer.id), follow_redirects=True)
+
+        rv_data = json.loads(rv.data.decode("utf-8"))
+        self.assertFalse(rv_data['success'])
+
+        answer_binding = data.AnswersBinding.query.filter_by(question_id=question.id,
+                                                             answer_id=answer.id).first()
+        current_nb_votes = answer_binding.nb_votes
+        self.assertEqual(current_nb_votes, previous_nb_votes, "The vote has been taken account, whereas it should have not")
 
 if __name__ == '__main__':
     unittest.main()

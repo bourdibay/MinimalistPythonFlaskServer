@@ -108,7 +108,14 @@ def inc_nb_votes():
         arg_answer_id = args['answer_id']
         answer_binding = data.AnswersBinding.query.filter_by(question_id=arg_question_id,
                                                              answer_id=arg_answer_id).first()
+        if answer_binding:
+            question = data.Questions.query.filter_by(id=arg_question_id).first()
+            if question:
+                now = datetime.now()
+                if not (question.datetime_start < now and question.datetime_expiry > now):
+                    return json.dumps({"success": False, "message": "Question expired"})
         answer_binding.nb_votes += 1
+        db.session.commit()
         return json.dumps({"success": True, "message": answer_binding.nb_votes})
     except Exception as e:
         utils.print_exception(e)

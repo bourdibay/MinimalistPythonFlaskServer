@@ -76,12 +76,20 @@ def clean_all():
 def serve_index(path):
     return "serve index"
 
+
+@app.route('/inittest')
+@cross_origin()
+def init_test(path):
+    db.create_all()
+    test_init()
+    return "inittest"
+
 # Fill the database at the launch.
 @app.before_first_request
 def initialize():
     try:
         clean_db()
-        test_init()
+        db.create_all()
     except Exception as e:
         utils.print_exception(e)
 
